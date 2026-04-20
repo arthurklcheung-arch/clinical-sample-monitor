@@ -57,19 +57,48 @@ function setupClientPrefixSheet() {
 
 // ============================================================
 // HELPER: Get LabID prefix for a client + service type
+// Handles multiple prefixes per client/service (Condition column)
+// Returns: { prefix, condition } or prompts user to choose
 // ============================================================
 function getLabIDPrefix(clientId, serviceType) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('CLIENT_PREFIXES');
-  if (!sheet) return serviceType; // fallback to service type name
+  if (!sheet) return { prefix: serviceType, condition: 'Standard' };
 
   const data = sheet.getDataRange().getValues();
+  const matches = [];
+
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === clientId && data[i][2] === serviceType) {
-      return data[i][3]; // return the prefix
+      matches.push({
+        condition: data[i][3], // Condition column
+        prefix:    data[i][4]  // LabID_Prefix column
+      });
     }
   }
-  return serviceType; // fallback
+
+  if (matches.length === 0) return { prefix: serviceType, condition: 'Standard' };
+  if (matches.length === 1) return matches[0];
+
+  // Multiple prefixes — ask user to choose
+  const ui = SpreadsheetApp.getUi();
+  let optionList = '';
+  matches.forEach((m, idx) => {
+    optionList += (idx + 1) + '. ' + m.condition + ' → ' + m.prefix + '\n';
+  });
+
+  const result = ui.prompt(
+    '⚠️ Multiple Prefixes Found',
+    'Client has multiple ' + serviceType + ' prefixes:\n\n' +
+    optionList +
+    '\nEnter the number of the prefix to use:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (result.getSelectedButton() !== ui.Button.OK) return matches[0];
+
+  const choice = parseInt(result.getResponseText().trim()) - 1;
+  if (choice >= 0 && choice < matches.length) return matches[choice];
+  return matches[0]; // fallback to first
 }
 
 
@@ -280,8 +309,10 @@ function registerNewSample() {
   }
 
   // ── Step 5: Generate LabID ─────────────────────────────
-  const prefix = getLabIDPrefix(clientId, serviceType);
-  const labId  = generateLabID(prefix, sampleId);
+  const prefixResult2 = getLabIDPrefix(clientId, serviceType);
+  const prefix    = prefixResult2.prefix;
+  const condition = prefixResult2.condition;
+  const labId     = generateLabID(prefix, sampleId);
 
   // Confirm before saving
   const confirm = ui.alert(
